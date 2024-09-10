@@ -27,20 +27,23 @@ import cv2
 import pandas
 import sklearn
 
-#def burn_eyes(image):
-#    output = np.copy(image)
-#    output = cv2.resize(output)
-#    return output
-
+def burn_eyes(image):
+    output = np.copy(image)
+    output = cv2.resize(output, dsize=(0,0), fx=0.1, fy=0.1)
+    output = cv2.resize(output, dsize=(0,0), fx=10.0, fy=10.0, 
+                        interpolation=cv2.INTER_NEAREST)
+    return output
+ 
 def blur_across_buffer(frame_buffer, time_index, frame):
     frame = frame.astype(np.float64)
     frame /= 255.0
+    
     frame_buffer[time_index] = frame
     ave_image = np.mean(frame_buffer, axis=0)
-
+    
     time_index += 1
-    time_index %= frame_buffer.shape[0]
-
+    time_index %= len(frame_buffer) # frame_buffer.shape[0]
+    
     return frame_buffer, time_index, ave_image
 
 
@@ -121,10 +124,14 @@ def main():
     # Create window ahead of time
     cv2.namedWindow(windowName)
     
-    # While not closed...
+    capture.set(cv2.CAP_PROP_FRAME_WIDTH, 800)
+    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 600)
+    
+    my_frames = []
+    
     frame_buffer = None
     time_index = 0
-    
+    # While not closed...
 
     key = -1
     while key == -1:
@@ -137,13 +144,36 @@ def main():
                 vido_shape = (10,) +frame.shape
                 frame_buffer=np.zeros(vido_shape, dtype=np.float64)
             cv2.imshow(windowName, frame)
+
+            proc_frame = burn_eyes(frame)
+            
+            cv2.imshow("UNSPEAKABLE HORRORS", proc_frame)
+            
+            frame_buffer, time_index, ave_image = blur_across_buffer(frame_buffer,
+                                                                     time_index,
+                                                                     frame)
+            
+            cv2.imshow("AVERAGE", ave_image)
+            
+            fimage = frame.astype(np.float64)/255.0
+            fimage = np.absolute(fimage - ave_image)
+            
+            cv2.imshow("GHOST", fimage)
+            
+            frame_cnt = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+            frame_index = int(capture.get(cv2.CAP_PROP_POS_FRAMES))
+            
+            if(frame_cnt != -1 and frame_cnt == frame_index):
+                capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
         else:
             break
 
         # Wait 30 milliseconds, and grab any key presses
         key = cv2.waitKey(30)
 
-    # Release the capture and destroy the window
+        my_video = np.array(my_frames)
+        print("VIDEO:", my_video.shape)
+    # Re\lease the capture and destroy the window
     capture.release()
     cv2.destroyAllWindows()
 
