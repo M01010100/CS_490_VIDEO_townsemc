@@ -58,7 +58,7 @@ def main():
         print("Opening webcam...")
 
         # Linux/Mac (or native Windows) with direct webcam connection
-        capture = cv2.VideoCapture(0, cv2.CAP_DSHOW) # CAP_DSHOW recommended on Windows 
+        capture = cv2.VideoCapture(1) #, cv2.CAP_DSHOW) # CAP_DSHOW recommended on Windows 
         # WSL: Use Yawcam to stream webcam on webserver
         # https://www.yawcam.com/download.php
         # Get local IP address and replace
@@ -96,7 +96,10 @@ def main():
     # While not closed...
     key = -1
     prev_frame = None
-
+    
+    kfx = np.array([[-1, 1],
+                    [-1, 1]], dtype="float64")
+    
     while key == -1:
         # Get next frame from capture
         ret, frame = capture.read()
@@ -104,10 +107,20 @@ def main():
         if ret == True:        
             # Show the image
             cv2.imshow(windowName, frame)
-
-            gray_image = cv2.cvtColor(frame, cv2.COLOR_BAYER_BG2GRAY).astype("float64")
+            
+            gray_image = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype("float64")
             gray_image /= 255.0
-
+            
+            kernel_size = 17
+            gray_image = cv2.GaussianBlur(gray_image, 
+                                          ksize=(kernel_size, kernel_size),
+                                          sigmaX=0)
+            
+            cv2.imshow("GRAY", gray_image)
+            
+            fx = cv2.filter2D(gray_image, cv2.CV_64F, kfx)
+            cv2.imshow("FX", np.absolute(fx)*4.0)
+            
             if prev_frame is None:
                 prev_frame = np.copy(gray_image)
             
@@ -115,8 +128,11 @@ def main():
             diff_image = np.absolute(diff_image)
             
             cv2.imshow("DIFF", diff_image)
-
-            prev_frame = np.copy(gray_image)
+            
+            
+            prev_frame = np.copy(gray_image)    
+            
+            
         else:
             break
 
@@ -132,3 +148,4 @@ def main():
 
 if __name__ == "__main__": 
     main()
+    # The end
