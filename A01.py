@@ -4,8 +4,8 @@ import os
 import sys
 from pathlib import Path
 
-def load_video_as_frames(video_filePath):
-    capture = cv2.VideoCapture(video_filePath)
+def load_video_as_frames(video_filepath):
+    capture = cv2.VideoCapture(video_filepath)
     if capture.isOpened():
         print("ERROR: Could not open or find the video!")
         exit(1)
@@ -52,19 +52,15 @@ def main():
     video_filepath = sys.argv[1]
     output_dir = sys.argv[2]
     
-    # Get the core filename from the video path
     basename = Path(video_filepath).stem
     
-    # Load frames
     all_frames = load_video_as_frames(video_filepath)
     if all_frames is None:
         print("Error: Failed to load frames.")
         sys.exit(1)
     
-    # Display frames
     display_frames(all_frames, "Input Video", fps=30)
     
-    # Save frames
     save_frames(all_frames, output_dir, basename, fps=30)
 
 if __name__ == "__main__":
