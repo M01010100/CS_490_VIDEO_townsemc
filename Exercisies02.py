@@ -78,12 +78,15 @@ def filter(video, kernal):
     for t in range(video.shape[0]):
         for row in range(video.shape[1]):
             for col in range(video.shape[2]):
+                output[t, row, col] = filterNeighborhood2D(video[t], kernal, row, col)
+    return output
 
 ###############################################################################
 # MAIN
 ###############################################################################
 
-def main():        
+def main():
+            
     dummy_image = np.zeros((10,10), dtype="float64")
     dummy_filter= np.zeros((3,3), dtype="float64")
     dummy_output = filter2D(dummy_image, dummy_filter)
