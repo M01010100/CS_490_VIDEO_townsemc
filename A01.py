@@ -41,6 +41,7 @@ def save_frames(all_frames, output_dir, basename, fps=30):
             print(f"Warning: Could not remove existing directory {outputPath}. ({e})")
     
     os.makedirs(outputPath)
+    
     for i, frame in enumerate(all_frames):
         filename = f"image_{i:07d}.png"
         full_path = os.path.join(outputPath, filename)
