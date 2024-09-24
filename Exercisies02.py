@@ -27,60 +27,213 @@ import cv2
 import pandas
 import sklearn
 
-def filterNeighborhood2D(image, kernal, crow, ccol):
-    halfH = kernal.shape[0]//2
-    halfW = kernal.shape[1]//2
+def filterNeighborhood2D(image, kernel, crow, ccol):
+    halfH = kernel.shape[0]//2
+    halfW = kernel.shape[1]//2
     
-    startOFFH = (1-kernal.shape[0]%2)
-    startOFFW = (1 - kernal.shape[1]%2)
+    startOffH = (1 - kernel.shape[0]%2)
+    startOffW = (1 - kernel.shape[1]%2)
     
     endRow = crow + halfH
     endCol = ccol + halfW
     
-    startRow = crow - halfH + startOFFH
-    startCol = ccol = halfW + startOFFW
-    
+    startRow = crow - halfH + startOffH
+    startCol = ccol - halfW + startOffW
     
     clamp_startRow = max(0, startRow)
     clamp_startCol = max(0, startCol)
     neighborhood = image[clamp_startRow:(endRow+1), clamp_startCol:(endCol+1)]
     
     if startRow < 0:
-        kernal = kernal[-startRow:]
+        kernel = kernel[-startRow:]
     elif endRow > (image.shape[0]-1):
-        off = image.shape[0] -1 - endRow
-        kernal = kernal[0:(kernal.shape[0]-off)]
+        off = image.shape[0] - 1 - endRow
+        kernel = kernel[0:(kernel.shape[0]+off)]
+            
     if startCol < 0:
-        kernal = kernal[:, -startCol:]
+        kernel = kernel[:, -startCol:]
     elif endCol > (image.shape[1]-1):
         off = image.shape[1] - 1 - endCol
-        kernal = kernal[:, 0:(kernal.shape[1]+off)]
+        kernel = kernel[:, 0:(kernel.shape[1]+off)]
+        
+    #print("NEIGHBORHOOD:", neighborhood.shape)
+    #print("KERNEL:", kernel.shape) 
     
-    print("NEIGHBORHOOD: ", neighborhood.shape)
-    print("KERNAL:", kernal.shape)
-    
-    value = kernal * neighborhood
-    value = np.sum(value)
+    value = kernel * neighborhood
+    value = np.sum(value)  
     
     return value
 
-def filter2D(image, kernal):
+def filterNeighborhood3D(video, kernel, ctime, crow, ccol):
+    halfT = kernel.shape[0]//2
+    halfH = kernel.shape[1]//2
+    halfW = kernel.shape[2]//2
+    
+    startOffT = (1 - kernel.shape[0]%2)
+    startOffH = (1 - kernel.shape[1]%2)
+    startOffW = (1 - kernel.shape[2]%2)
+    
+    endTime = ctime + halfT
+    endRow = crow + halfH
+    endCol = ccol + halfW
+    
+    startTime = ctime - halfT + startOffT
+    startRow = crow - halfH + startOffH
+    startCol = ccol - halfW + startOffW
+    
+    clamp_startTime = max(0, startTime)
+    clamp_startRow = max(0, startRow)
+    clamp_startCol = max(0, startCol)
+    neighborhood = video[   clamp_startTime:(endTime+1),
+                            clamp_startRow:(endRow+1), 
+                            clamp_startCol:(endCol+1)]
+    
+    def get_bounds(start, end, max_image_size, max_kernel_size):
+        if start < 0:
+            s = -start
+            e = max_kernel_size
+        elif end > (max_image_size-1):
+            off = max_image_size - 1 - end
+            s = 0
+            e = max_kernel_size + off
+        else:
+            s = 0
+            e = max_kernel_size
+            
+        return s,e
+    
+    st, et = get_bounds(startTime, endTime, video.shape[0], kernel.shape[0])
+    sr, er = get_bounds(startRow, endRow, video.shape[1], kernel.shape[1])
+    sc, ec = get_bounds(startCol, endCol, video.shape[2], kernel.shape[2])
+       
+    kernel = kernel[st:et, sr:er, sc:ec]
+      
+    print("NEIGHBORHOOD:", neighborhood.shape)
+    print("KERNEL:", kernel.shape) 
+    
+    value = kernel * neighborhood
+    value = np.sum(value)  
+    
+    return value
+
+def filter2D(image, kernel):
     output = np.copy(image)
     
     for row in range(image.shape[0]):
         for col in range(image.shape[1]):
-            output[row,col] = filterNeighborhood2D(image, kernal, row, col)
-    return output
+            output[row,col] = filterNeighborhood2D(image, kernel, row, col)
+            
+    return output 
 
-def filter(video, kernal):
+def filter3D(video, kernel):
     output = np.copy(video)
     
     for t in range(video.shape[0]):
         for row in range(video.shape[1]):
             for col in range(video.shape[2]):
-                output[t, row, col] = filterNeighborhood2D(video[t], kernal, row, col)
+                output[t,row,col] = filterNeighborhood3D(video, kernel, t, row, col)           
+
     return output
 
+def compute_one_optical_flow_horn_shunck(prev_frame, cur_frame,
+                                        kfx, kfy, kft1, kft2,
+                                        max_iter=20):
+    
+    fx = (cv2.filter2D(prev_frame, cv2.CV_64F, kfx) 
+          + cv2.filter2D(cur_frame, cv2.CV_64F, kfx))
+    
+    fy = (cv2.filter2D(prev_frame, cv2.CV_64F, kfy) 
+          + cv2.filter2D(cur_frame, cv2.CV_64F, kfy))
+    
+    ft = (cv2.filter2D(prev_frame, cv2.CV_64F, kft1) 
+          + cv2.filter2D(cur_frame, cv2.CV_64F, kft2))
+    
+    fx /= 4.0
+    fy /= 4.0
+    ft /= 4.0
+    
+    u = np.zeros(fx.shape, dtype="float64")
+    v = np.zeros(fx.shape, dtype="float64")
+    
+    lap_filter = np.array([[0, 0.25, 0],
+                          [0.25,0,0.25],
+                          [0,0.25,0]], dtype="float64")
+    
+    converged = False
+    iter_cnt = 0
+    lamb = 0.1
+    print_inc = 5
+    
+    while not converged:
+        # MAGIC
+        uav = cv2.filter2D(u, cv2.CV_64F, lap_filter)
+        vav = cv2.filter2D(v, cv2.CV_64F, lap_filter)
+        
+        P = fx*uav + fy*vav + ft
+        D = lamb + fx*fx + fy*fy
+        
+        PD = P/D
+        
+        u = uav - fx*PD
+        v = vav - fy*PD
+                
+        iter_cnt += 1
+        
+        if iter_cnt % print_inc == 0:
+            print("ITERATION", iter_cnt, "DONE...")
+                
+        if iter_cnt >= max_iter:
+            converged = True
+            
+    
+#<<<<<<< HEAD
+    
+def compute_optical_flow_horn_shunck(video_frames, kfx, kfy, kft1, kft2):
+#=======
+    extra = np.zeros_like(u)
+    combo = np.stack([u,v,extra], axis=-1)
+    
+    return combo       
+    
+def compute_optical_flow_horn_shunck(video_frames, kfx, kfy, kft1, kft2,
+                                     max_iter=20):
+#>>>>>>> 4a24c951b2af164cf9dac8d792e7b34b688e376f
+    all_flow = []
+    prev_frame = None
+    #index = 0
+        
+    for index, frame in enumerate(video_frames):
+        print("** FRAME", index, "************************")
+        if prev_frame is None:
+            prev_frame = frame
+            
+        flow = compute_one_optical_flow_horn_shunck(prev_frame, frame,
+                                                    kfx, kfy, kft1, kft2,
+                                                    max_iter=max_iter)
+        all_flow.append(flow)
+        prev_frame = frame
+        #index += 1
+        
+    return all_flow
+
+
+def make_test_video(image_size=(480,640), frame_cnt=30, inc_x=5, inc_y=0):
+    video_frames = []
+    
+    start_pos = [100,100]
+    end_pos = [200,200]
+    
+    for index in range(frame_cnt):
+        frame = np.zeros(image_size, dtype="float64")
+        cv2.rectangle(frame, start_pos, end_pos, (1.0,), -1)
+        video_frames.append(frame)
+        start_pos[0] += inc_x
+        end_pos[0] += inc_x
+        
+        start_pos[1] += inc_y
+        end_pos[1] += inc_y
+        
+    return video_frames        
 ###############################################################################
 # MAIN
 ###############################################################################
@@ -158,6 +311,14 @@ def main():
     
     kfx = np.array([[-1, 1],
                     [-1, 1]], dtype="float64")
+    kfy = np.array([[-1,-1],
+                    [1,1]], dtype="float64")
+    kft1 = np.array([[-1,-1],
+                     [-1,-1]], dtype="float64")
+    kft2 = np.array([[1,1],
+                     [1,1]], dtype="float64")
+    
+    video_frames = []    
     
     while key == -1:
         # Get next frame from capture
@@ -171,13 +332,15 @@ def main():
             gray_image /= 255.0
             
             kernel_size = 17
-            gray_image = cv2.GaussianBlur(gray_image, 
-                                          ksize=(kernel_size, kernel_size),
-                                          sigmaX=0)
+            #gray_image = cv2.GaussianBlur(gray_image, 
+            #                              ksize=(kernel_size, kernel_size),
+            #                              sigmaX=0)
             
             cv2.imshow("GRAY", gray_image)
             
+            '''
             #fx = cv2.filter2D(gray_image, cv2.CV_64F, kfx)
+            fx = filter2D(gray_image, kfx)
             
             cv2.imshow("FX", np.absolute(fx)*4.0)
             
@@ -188,11 +351,11 @@ def main():
             diff_image = np.absolute(diff_image)
             
             cv2.imshow("DIFF", diff_image)
+            '''
             
-            
-            prev_frame = np.copy(gray_image)    
-            
-            
+            video_frames.append(gray_image)
+                        
+            prev_frame = np.copy(gray_image)              
         else:
             break
 
@@ -201,6 +364,31 @@ def main():
 
     # Release the capture and destroy the window
     capture.release()
+    cv2.destroyAllWindows()
+    
+    key = -1
+    ESC_KEY = 27
+    index = 0
+    
+    # OVERRIDE
+    #video_frames = make_test_video(inc_x=0, inc_y=5)
+          
+    flow_frames = compute_optical_flow_horn_shunck(video_frames, 
+                                                    kfx, kfy,
+                                                    kft1, kft2)
+        
+    while key != ESC_KEY:
+        cur_frame = video_frames[index]
+        flow_frame = np.absolute(flow_frames[index])
+        
+        cv2.imshow("ORIGINAL", cur_frame)      
+        cv2.imshow("FLOW", flow_frame)  
+        key = cv2.waitKey(33)
+                
+        index += 1
+        if index >= len(video_frames):
+            index = 0
+
     cv2.destroyAllWindows()
 
     # Close down...

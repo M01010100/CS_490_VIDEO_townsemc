@@ -186,10 +186,10 @@ def compute_one_optical_flow_horn_shunck(prev_frame, cur_frame,
             converged = True
             
     
-<<<<<<< HEAD
+#<<<<<<< HEAD
     
 def compute_optical_flow_horn_shunck(video_frames, kfx, kfy, kft1, kft2):
-=======
+#=======
     extra = np.zeros_like(u)
     combo = np.stack([u,v,extra], axis=-1)
     
@@ -197,7 +197,7 @@ def compute_optical_flow_horn_shunck(video_frames, kfx, kfy, kft1, kft2):
     
 def compute_optical_flow_horn_shunck(video_frames, kfx, kfy, kft1, kft2,
                                      max_iter=20):
->>>>>>> 4a24c951b2af164cf9dac8d792e7b34b688e376f
+#>>>>>>> 4a24c951b2af164cf9dac8d792e7b34b688e376f
     all_flow = []
     prev_frame = None
     #index = 0
@@ -271,7 +271,7 @@ def main():
         print("Opening webcam...")
 
         # Linux/Mac (or native Windows) with direct webcam connection
-        capture = cv2.VideoCapture(1) #, cv2.CAP_DSHOW) # CAP_DSHOW recommended on Windows 
+        capture = cv2.VideoCapture(0) #, cv2.CAP_DSHOW) # CAP_DSHOW recommended on Windows 
         # WSL: Use Yawcam to stream webcam on webserver
         # https://www.yawcam.com/download.php
         # Get local IP address and replace
