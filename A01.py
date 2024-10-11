@@ -25,9 +25,8 @@ def display_frames(all_frames, title, fps=30):
     wait = compute_wait(fps)
     for frame in all_frames:
         cv2.imshow(title, frame)
-        if cv2.waitKey(wait):
-            break
-
+        cv2.waitKey(wait)
+            
     cv2.destroyAllWindows()
     
 def save_frames(all_frames, output_dir, basename, fps=30):
