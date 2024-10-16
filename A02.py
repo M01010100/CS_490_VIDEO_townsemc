@@ -7,42 +7,130 @@ class OPTICAL_FLOW(Enum):
     
     
 def compute_video_derivatives(video_frames, size):
-    match size:
-        case 2:
-             kfx = np.array([[-1, 1], 
-                             [-1, 1]])
-             kfy = np.array([[-1, -1], 
-                             [1, 1]])
-             kft1 = np.array([[-1, -1], 
-                              [-1, -1]])
-             kft2 = np.array([[1, 1], 
-                              [1, 1]])
-        case 3:
-             kfx = np.array([[-1, 0, 1], 
-                             [-2, 0, 2], 
-                             [-1, 0, 1]])
-             kfy = np.array([[-1,-2,-1],
-                             [0, 0, 0],
-                             [1, 2, 1]])
-             kft1 = np.array([[-1,-2,-1],
-                              [-2,-4,-2],
-                              [-1,-2,-1]])
-             kft2 = np.array([[1, 2, 1],
-                              [2, 4, 2],
-                              [1, 2, 1]])
-        case _: 
-            return None
-    #TODO
+    all_fx = []
+    all_fy = []
+    all_ft = []
+    if size == 2:
+        kfx = np.array([[-1, 1], [-1, 1]])
+        kfy = np.array([[-1, -1], [1, 1]])
+        kft1 = np.array([[-1, -1], [-1, -1]])
+        kft2 = np.array([[1, 1], [1, 1]])
+        scale_fx_fy = 4.0
+        scale_ft = 4.0
+        
+    elif size == 3:
+        kfx = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
+        kfy = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]])
+        kft1 = np.array([[-1, -2, -1], [-2, -4, -2], [-1, -2, -1]])
+        kft2 = np.array([[1, 2, 1], [2, 4, 2], [1, 2, 1]])
+        scale_fx_fy = 8.0
+        scale_ft = 16.0
+
+    else:
+        return None
     
+    prev_frame = None
+    for i in range(len(video_frames)):
+            
+            new_frame = video_frames[i]
+            
+            #Make current frame grayscale            
+            new_frame = cv2.cvtColor(new_frame, cv2.COLOR_BGR2GRAY).astype("float64")
+            new_frame /= 255.0
+            
+            print("apply the filers")
+            
+            #if previous frame(old_frame) not set, set it to current(now_frame)
+            if prev_frame is None:
+                prev_frame = new_frame
+            
+            fx = ((cv2.filter2D(prev_frame, cv2.CV_64F, kfx) + cv2.filter2D(new_frame, cv2.CV_64F, kfx))) / scale_fx_fy
+
+            fy = ((cv2.filter2D(prev_frame, cv2.CV_64F, kfy) + cv2.filter2D(new_frame, cv2.CV_64F, kfy))) / scale_fx_fy
+
+            ft = ((cv2.filter2D(prev_frame, cv2.CV_64F, kft1) + cv2.filter2D(new_frame, cv2.CV_64F, kft2))) / scale_ft
+            
+            
+            all_fx.append(fx) 
+            all_fy.append(fy)
+            all_ft.append(ft)
+            
+            prev_frame = new_frame
+    
+    return all_fx, all_fy, all_ft
 
 def compute_one_optical_flow_horn_shunck(fx, fy, ft, max_iter, max_error, weight=1.0):
-    #TODO
-    return None
+    height, width = fx.shape
+    u = np.zeros((height, width), dtype=np.float64)
+    v = np.zeros((height, width), dtype=np.float64)
 
-def compute_optical_flow(video_frames, method=OPTICAL_FLOW.HORN_SHUNCK, 
-                         max_iter=10, max_error=1e-4, horn_weight=1.0, kanade_win_size=19):   
-    #TODO
-    return None
+    kfx = np.array([[-1, 1]], dtype=np.float64)
+    kfy = np.array([[-1], [1]], dtype=np.float64)
+    
+    lap_filter = np.array([[0, 0.25, 0],
+                          [0.25,0,0.25],
+                          [0,0.25,0]], dtype="float64")
+    
+    converged = False
+    iterCount = 0
+    lamb = weight
+    print_inc = 5
+
+    while not converged:
+        # MAGIC      
+        uav = cv2.filter2D(u, cv2.CV_64F, lap_filter)
+        vav = cv2.filter2D(v, cv2.CV_64F, lap_filter)
+        
+        P = fx*uav + fy*vav + ft
+        D = lamb + fx*fx + fy*fy
+        
+        PD = P/D
+        
+        u = uav - fx*PD
+        v = vav - fy*PD
+        
+        ux = cv2.filter2D(u, cv2.CV_64F, kfx)
+        uy = cv2.filter2D(u, cv2.CV_64F, kfy)
+        vx = cv2.filter2D(v, cv2.CV_64F, kfx)
+        vy = cv2.filter2D(v, cv2.CV_64F, kfy)
+        
+        error = lamb * np.mean(ux*ux + uy*uy + vx*vx + vy*vy)
+        
+        one_equation = (fx*u + fy*v + ft)*(fx*u + fy*v + ft)
+              
+        error += np.mean(one_equation)
+        
+        iterCount += 1
+        
+        if iterCount % print_inc == 0:
+            print("ITERATION", iterCount, "DONE...")
+        
+        if error <= max_error:
+            converged = True
+            
+        if iterCount >= max_iter:
+            converged = True
+   
+    extra = np.zeros_like(u)
+    combo = np.stack([u,v,extra], axis=-1)
+
+    return combo, error, iterCount
+
+def compute_optical_flow(video_frames, method=OPTICAL_FLOW.HORN_SHUNCK,
+                         max_iter=10, max_error=1e-4, horn_weight=1.0, kanade_win_size=19):
+    if method == OPTICAL_FLOW.HORN_SHUNCK:
+        size = 2
+        all_fx, all_fy, all_ft = compute_video_derivatives(video_frames, size)
+
+        flow_frames = []
+        for fx, fy, ft in zip(all_fx, all_fy, all_ft):
+            flow, _, _ = compute_one_optical_flow_horn_shunck(fx, fy, ft, max_iter, max_error, horn_weight)
+            flow_frames.append(flow)
+
+        return flow_frames
+    else:
+        raise NotImplementedError("Lucas-Kanade method not implemented")
+
 
 def main():      
     # Load video frames 
