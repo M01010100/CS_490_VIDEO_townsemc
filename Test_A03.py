@@ -44,10 +44,10 @@ def track_doggos(dog_video_list, show_dog_videos):
     print_metrics(all_metrics)
     with open(BASE_OUT_DIR + "/RESULTS.txt", "w") as f:
         print_metrics(all_metrics, f)
-        
+
+
 def main():
     track_doggos(UG_DOG_LIST, show_dog_videos=show_dog_videos)
     
 if __name__ == "__main__": 
     main()
-    
