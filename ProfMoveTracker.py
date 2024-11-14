@@ -77,6 +77,7 @@ def scale_box(box, psy, psx, ph, pw):
     
     return (ymin, xmin, ymax, xmax)
 
+
 def main():
     # Load dog dataset
     dog_index = 7 #11
@@ -159,4 +160,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    

@@ -1,87 +1,96 @@
 import cv2
 import numpy as np
 
-def compute_optical_flow(video_frames, method):
-    # Placeholder function for computing optical flow
-    # Replace this with the actual implementation or import statement
-    return [np.zeros_like(frame) for frame in video_frames]
-
-def calculate_iou(pred_mask, true_mask):
-    intersection = np.logical_and(pred_mask, true_mask).sum()
-    union = np.logical_or(pred_mask, true_mask).sum()
-    iou = intersection / union if union != 0 else 0
-    return iou
-
-def calculate_accuracy(pred_mask, true_mask):
-    correct = (pred_mask == true_mask).sum()
-    total = true_mask.size
-    accuracy = correct / total
-    return accuracy
-
-def get_predicted_mask(flow):
-    mag, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
-    threshold = 10  
-    mask = mag > threshold
-
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask.astype(np.uint8))
-    largest_label = np.argmax(stats[1:, -1]) + 1
-    pred_mask = labels == largest_label
-
-    return pred_mask
-
-def track_doggo(video_frames, first_box):
-    term_criteria = (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, 5, 1)
+def track_doggo(video_frames, first_box):    
+    params = {
+        'search_margin': 40,
+        'min_confidence': 0.1,
+        'hist_bins': 32, 
+        'learning_rate': 0.01,   
+        'smooth_factor': 0.5,   
+        'size_change_thresh': 0.9 
+    }
     
+    tracker = cv2.TrackerMIL.create()
     
-    track_window = (
-        first_box[1],                
-        first_box[0],                
-        first_box[3] - first_box[1], 
-        first_box[2] - first_box[0]  
-    )
+    x = first_box[1]
+    y = first_box[0]
+    w = first_box[3] - first_box[1]
+    h = first_box[2] - first_box[0]
+    init_size = np.array([h, w])
+    aspect_ratio = w/h
+    bbox = (x, y, w, h)
     
     first_frame = video_frames[0]
+    ok = tracker.init(first_frame, bbox)
+    
     roi = first_frame[first_box[0]:first_box[2], first_box[1]:first_box[3]]
-    
     hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    
-    roi_hist = cv2.calcHist([hsv_roi], [0], None, [32], [0,180])
+    roi_hist = cv2.calcHist([hsv_roi], [0, 1], None, 
+                           [params['hist_bins']]*2, [0, 180, 0, 256])
     cv2.normalize(roi_hist, roi_hist, 0, 255, cv2.NORM_MINMAX)
     
     predicted_boxes = []
+    prev_box = first_box
+    center = np.array([(x+x+w)/2, (y+y+h)/2])
+    velocity = np.zeros(2)
     
     for frame in video_frames:
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        pred_center = center + velocity
         
-        back_proj = cv2.calcBackProject([hsv], [0], roi_hist, [0,180], 1)
+        ok, bbox = tracker.update(frame)
         
-        mask = get_hue_mask(hsv)
-        back_proj *= mask
+        if ok:
+            x, y, w, h = [int(v) for v in bbox]
+            current_size = np.array([h, w])
+            
+            size_change = np.abs(current_size - init_size) / init_size
+            if np.any(size_change > params['size_change_thresh']):
+                if w/h > aspect_ratio:
+                    w = int(h * aspect_ratio)
+                else:
+                    h = int(w / aspect_ratio)
+            
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            back_proj = cv2.calcBackProject([hsv], [0, 1], roi_hist, 
+                                          [0, 180, 0, 256], 1)
+            
+            roi_back_proj = back_proj[y:y+h, x:x+w]
+            confidence = np.mean(roi_back_proj) / 255.0
+            
+            if confidence > params['min_confidence']:
+                new_center = np.array([x + w/2, y + h/2])
+                center = params['smooth_factor'] * center + \
+                        (1 - params['smooth_factor']) * new_center
+                
+                velocity = new_center - center
+                
+                pred_box = (
+                    max(0, int(center[1] - h/2)),
+                    max(0, int(center[0] - w/2)),
+                    min(frame.shape[0], int(center[1] + h/2)),
+                    min(frame.shape[1], int(center[0] + w/2))
+                )
+                
+                roi = frame[pred_box[0]:pred_box[2], pred_box[1]:pred_box[3]]
+                if roi.size > 0:
+                    hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+                    temp_hist = cv2.calcHist([hsv_roi], [0, 1], None,
+                                           [params['hist_bins']]*2, 
+                                           [0, 180, 0, 256])
+                    cv2.normalize(temp_hist, temp_hist, 0, 255, cv2.NORM_MINMAX)
+                    roi_hist = (1-params['learning_rate'])*roi_hist + \
+                              params['learning_rate']*temp_hist
+                
+                prev_box = pred_box
+            else:
+                pred_box = prev_box
+        else:
+            pred_box = prev_box
+            tracker = cv2.TrackerMIL.create()
+            tracker.init(frame, (prev_box[1], prev_box[0],
+                               prev_box[3]-prev_box[1],
+                               prev_box[2]-prev_box[0]))
         
-        ret, track_window = cv2.CamShift(back_proj, track_window, term_criteria)
-        
-        pts = cv2.boxPoints(ret)
-        pts = np.int0(pts)
-        x = min(pts[:,0])
-        y = min(pts[:,1]) 
-        w = max(pts[:,0]) - x
-        h = max(pts[:,1]) - y
-        
-        pred_box = (y, x, y+h, x+w)
         predicted_boxes.append(pred_box)
-        
     return predicted_boxes
-
-def get_hue_mask(hsv):
-
-    hue = hsv[:,:,0]
-    
-    lower = 10
-    upper = 30
-    mask = cv2.inRange(hue, lower, upper)
-    
-    kernel = np.ones((5,5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    
-    return mask
