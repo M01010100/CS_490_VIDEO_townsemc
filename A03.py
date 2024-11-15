@@ -3,12 +3,12 @@ import numpy as np
 
 def track_doggo(video_frames, first_box):    
     params = {
-        'search_margin': 40,
+        'search_margin': 50,
         'min_confidence': 0.1,
-        'hist_bins': 32, 
+        'hist_bins': 48, 
         'learning_rate': 0.01,   
         'smooth_factor': 0.5,   
-        'size_change_thresh': 0.9 
+        'size_change_thresh': 2.0 
     }
     
     tracker = cv2.TrackerMIL.create()
