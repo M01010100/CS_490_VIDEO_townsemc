@@ -2,7 +2,7 @@ from General_A03 import *
 import A03
 import shutil
 
-UG_DOG_LIST = [7,8,11,9]
+UG_DOG_LIST = [7,8,11,9] #[1,2,3,4,5,6,7,8,9,10,11,12] [7,8,11,9]
 START_DOG_FRAME = 30
 MAX_DOG_FRAMES = 60 # 120
 show_dog_videos = True

@@ -9,12 +9,11 @@ def track_doggo(video_frames, first_box):
         'learning_rate': 0.01,   
         'smooth_factor': 0.5,   
         'size_change_thresh': 2.0, 
-        'min_size_ratio': 0.9,    
-        'max_size_ratio': 1.0,    
-        'size_momentum': 0.1      
+        'min_size_ratio': 0.5,    
+        'max_size_ratio': 1.5,    
+        'size_momentum': 0.4      
     }
     
-    # Initialize box
     x = first_box[1]
     y = first_box[0]
     w = first_box[3] - first_box[1]
@@ -25,12 +24,10 @@ def track_doggo(video_frames, first_box):
     aspect_ratio = w/h
     bbox = (x, y, w, h)
     
-    # Initialize tracker
     tracker = cv2.TrackerMIL.create()
     first_frame = video_frames[0]
     ok = tracker.init(first_frame, bbox)
     
-    # Color model
     roi = first_frame[first_box[0]:first_box[2], first_box[1]:first_box[3]]
     hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     roi_hist = cv2.calcHist([hsv_roi], [0, 1], None, 
@@ -49,23 +46,19 @@ def track_doggo(video_frames, first_box):
             x, y, w, h = [int(v) for v in bbox]
             new_size = np.array([h, w])
             
-            # Smooth size changes with momentum
             size_velocity = params['size_momentum'] * size_velocity + \
                           (1 - params['size_momentum']) * (new_size - current_size)
             current_size = current_size + size_velocity
             
-            # Enforce size limits
             current_size = np.clip(current_size, min_size, max_size)
             h, w = map(int, current_size)
             
-            # Maintain aspect ratio
             if abs(w/h - aspect_ratio) > 0.1:
                 if w/h > aspect_ratio:
                     w = int(h * aspect_ratio)
                 else:
                     h = int(w / aspect_ratio)
             
-            # Create prediction box
             pred_box = (
                 max(0, y),
                 max(0, x),
