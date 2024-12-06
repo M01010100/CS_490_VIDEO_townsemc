@@ -152,7 +152,7 @@ def get_predictions_and_ground(model, dataloader, device):
     all_pred = []
     
     with torch.no_grad():
-        for X, y in dataloader:
+        for X, _, y in dataloader:
             # Append ground truth info
             all_ground.append(y)
             
@@ -242,7 +242,7 @@ def print_results(approach_data, stream=sys.stdout):
         print("*", approach_name, file=stream)    
         print(model, file=stream)    
         print("", file=stream)     
-        print_count_parameters(model, file=stream)
+        print_count_parameters(model, stream=stream)
         print("", file=stream)      
   
 ###############################################################################
