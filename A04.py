@@ -51,7 +51,7 @@ class RNNVideoNet(nn.Module):
             #nn.ReLU(),
             nn.ELU(),
             nn.MaxPool3d((1,2,2)),
-            nn.ELU(),
+            
             
             nn.Conv3d(8, 16, (3,3,3), padding="same"),
             #nn.ReLU(),
