@@ -1,121 +1,232 @@
 import torch
-import torchvision.transforms as v2
+import torchvision
+from torch import nn
+from torch.utils.data import DataLoader, Dataset
+from torchvision import datasets
+from torchvision.transforms import v2
+import cv2
+import numpy as np
+import os
+import sys
+from prettytable import PrettyTable
+
+# early stopping
+# https://stackoverflow.com/a/73704579
+class EarlyStopper:
+    def __init__(self, patience=1, min_delta=0):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.counter = 0
+        self.min_validation_loss = float('inf')
+
+    def early_stop(self, validation_loss):
+        if validation_loss < self.min_validation_loss:
+            self.min_validation_loss = validation_loss
+            self.counter = 0
+        elif validation_loss > (self.min_validation_loss + self.min_delta):
+            self.counter += 1
+            if self.counter >= self.patience:
+                return True
+        return False
+
+
+    
+class RNNVideoNet(nn.Module):
+    def __init__(self, class_cnt):
+        super().__init__()
+        self.feature_extract = nn.ModuleList([
+            nn.Conv3d(in_channels=3, out_channels=8,
+                      kernel_size=(3,3,3),
+                      padding="same"), 
+            #nn.ReLU(),
+            nn.ELU(),
+            nn.Conv3d(8, 8, (3,3,3), padding="same"),
+            #nn.ReLU(),
+            nn.ELU(),
+            
+            nn.Conv3d(8, 8, (3,3,3), padding="same"),
+            #nn.ReLU(),
+            nn.ELU(),
+            nn.Conv3d(8, 8, (3,3,3), padding="same"),
+            #nn.ReLU(),
+            nn.ELU(),
+            nn.MaxPool3d((1,2,2)),
+            nn.ELU(),
+            
+            nn.Conv3d(8, 16, (3,3,3), padding="same"),
+            #nn.ReLU(),
+            nn.ELU(),
+            nn.Conv3d(16, 16, (3,3,3), padding="same"),
+            #nn.ReLU()
+            nn.ELU(),
+            
+            nn.Conv3d(16, 16, (3,3,3), padding="same"),
+            #nn.ReLU(),
+            nn.ELU(),
+            nn.Conv3d(16, 16, (3,3,3), padding="same"),
+            #nn.ReLU(),
+            nn.ELU(),
+            nn.MaxPool3d((1,2,2)),
+            
+            nn.Conv3d(16, 32, (3,3,3), padding="same"),
+            #nn.ReLU(),
+            nn.ELU(),
+            nn.Conv3d(32, 32, (3,3,3), padding="same"),
+            #nn.ReLU(),
+            nn.ELU(),
+            
+            nn.Conv3d(32, 32, (3,3,3), padding="same"),
+            #nn.ReLU(),
+            nn.ELU(),
+            nn.Conv3d(32, 32, (3,3,3), padding="same"),
+            #nn.ReLU(),
+            nn.ELU(),
+            nn.MaxPool3d((1,2,2)),
+            
+            nn.Conv3d(32, 64, (3,3,3), padding="same"),
+            #nn.ReLU(),
+            nn.ELU(),
+            nn.Conv3d(64, 64, (3,3,3), padding="same"),
+            #nn.ReLU(),
+            nn.ELU(),
+            
+            nn.Conv3d(64, 64, (3,3,3), padding="same"),
+            #nn.ReLU(),
+            nn.ELU(),
+            nn.Conv3d(64, 64, (3,3,3), padding="same"),
+            #nn.ReLU(),
+            nn.ELU(),
+            nn.MaxPool3d((1,2,2))
+        ])
+        
+        self.flatten = nn.Flatten(start_dim=2)
+        
+        expected_size = 4224
+        
+        self.rnn = nn.RNN(input_size=expected_size, 
+                          hidden_size=expected_size,
+                          num_layers=1,
+                          batch_first=True)
+        
+        self.classifier_stack = nn.Sequential(                           
+            nn.Linear(expected_size, class_cnt)
+        )
+        
+    def forward(self, x):
+        PRINT_DEBUG = False
+        x = torch.transpose(x, 1, 2)
+        for index, layer in enumerate(self.feature_extract):
+            x = layer(x)
+        if PRINT_DEBUG: print("FEATURES:", x.shape)
+        x = torch.transpose(x, 1, 2)
+        x = self.flatten(x)
+        if PRINT_DEBUG: print("FLATTENED:", x.shape)
+        out, _ = self.rnn(x)
+        if PRINT_DEBUG: print("OUT:", out.shape)
+        out = out[:,-1,:]        
+        logits = self.classifier_stack(out)
+        return logits
 
 def get_approach_names():
-    return ["CNN0", "CNN1"]
+    return ["CNN","RNN"]
 
 def get_approach_description(approach_name):
-    descriptions = {
-        "CNN0": "A simple CNN with basic layers.",
-        "CNN1": "A more complex CNN with additional layers."
+    desc = {
+        "CNN":"basic",
+        "RNN":"Based on the RNN Video Net example from class. Doubles out layers after every other block, kernel size (3,3,3). Training Data is augmented with randomly applied grayscale, h/v flips, and solarization."
     }
-    return descriptions.get(approach_name, "Unknown approach")
+    return desc.get(approach_name, "Invalid Approach Specified")
 
 def get_data_transform(approach_name, training):
-    def normalize_video(x):
-        # x is expected to be [C, F, H, W]
-        mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1, 1)
-        std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1, 1)
-        x = x.permute(1, 0, 2, 3)  # [F, C, H, W] -> [C, F, H, W]
-        x = (x - mean) / std
-        return x
-
-    if training:
-        return v2.Compose([
-            v2.Resize((240, 352)),
-            v2.Lambda(lambda x: x.float() / 255.0),  # Normalize to [0,1]
-            v2.Lambda(normalize_video)  # Will output [C, F, H, W]
-        ])
+    target_size = (100,180) #height,width. tiny because my gpu only has 8gb ram :(
+    if not training:
+        data_transform = v2.Compose([v2.ToImage(), 
+                                    v2.ToDtype(torch.float32, scale=True),
+                                    v2.Resize(target_size)])
     else:
-        return v2.Compose([
-            v2.Resize((240, 352)),
-            v2.Lambda(lambda x: x.float() / 255.0),
-            v2.Lambda(normalize_video)
-        ])
+        data_transform = v2.Compose([v2.ToImage(), 
+                                    v2.ToDtype(torch.float32, scale=True),
+                                    v2.RandomGrayscale(0.3),
+                                    v2.RandomSolarize(0.3),
+                                    v2.RandomHorizontalFlip(0.3),
+                                    v2.RandomVerticalFlip(0.3),
+                                    v2.Resize(target_size)])
+    return data_transform
 
 def get_batch_size(approach_name):
     batch_sizes = {
         "CNN0": 32,
-        "CNN1": 16
+        "CNN1": 64,
+        "RNN": 32
     }
-    return batch_sizes.get(approach_name, 32)
+    return batch_sizes.get(approach_name, None)
 
 def create_model(approach_name, class_cnt):
-    # Calculate proper dimensions based on input size
-    frames, height, width = 30, 240, 352
-    if approach_name == "CNN0":
-        # Adjust dimensions after pooling operations
-        f_out = frames // 4  # After 2 pooling layers
-        h_out = height // 4
-        w_out = width // 4
-        model = torch.nn.Sequential(
-            torch.nn.Conv3d(3, 16, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(),
-            torch.nn.MaxPool3d(kernel_size=2, stride=2),
-            torch.nn.Conv3d(16, 32, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(),
-            torch.nn.MaxPool3d(kernel_size=2, stride=2),
-            torch.nn.Flatten(),
-            torch.nn.Linear(32 * f_out * h_out * w_out, class_cnt)
-        )
-    elif approach_name == "CNN1":
-        # Adjust dimensions after pooling operations
-        f_out = frames // 8  # After 3 pooling layers
-        h_out = height // 8
-        w_out = width // 8
-        model = torch.nn.Sequential(
-            torch.nn.Conv3d(3, 32, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(),
-            torch.nn.MaxPool3d(kernel_size=2, stride=2),
-            torch.nn.Conv3d(32, 64, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(),
-            torch.nn.MaxPool3d(kernel_size=2, stride=2),
-            torch.nn.Conv3d(64, 128, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(),
-            torch.nn.MaxPool3d(kernel_size=2, stride=2),
-            torch.nn.Flatten(),
-            torch.nn.Linear(128 * f_out * h_out * w_out, class_cnt)
-        )
+    match approach_name:
+        case "CNN":
+            pass
+        case "RNN":
+            model = RNNVideoNet(class_cnt)
+        case _:
+            print("Invalid Approach Specified")
+            model = None
     return model
 
-def train_model(approach_name, model, device, train_dataloader, test_dataloader):
-    model.to(device)
-    criterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    num_epochs = 10
-
-    for epoch in range(num_epochs):
-        model.train()
-        for batch in train_dataloader:
-            inputs = batch[0].to(device)
-            labels = batch[1].squeeze().long().to(device)  # Squeeze labels to remove extra dimensions
+def train_one_epoch(dataloader, model, loss_fn, optimizer, device):
+    size = len(dataloader.dataset)
+    model.train()
+    # For HMDB: (X, _, y)
+    for batch, (input, _, label) in enumerate(dataloader):
+        input, label = input.to(device), label.to(device)
+        # Compute prediction error
+        pred = model(input)
+        loss = loss_fn(pred, label)
+        # Backpropagation
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        if batch % 100 == 0:
+            loss, current = loss.item(), (batch + 1) * len(input)
+            print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
             
-            # Clear memory
-            if hasattr(torch.cuda, 'empty_cache'):
-                torch.cuda.empty_cache()
-                
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
+        if hasattr(torch.cuda, 'empty_cache'):
+            torch.cuda.empty_cache()
+        
+            
+def test_one_epoch(dataloader, model, loss_fn, data_name, device):
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    model.eval()
+    test_loss, correct = 0, 0
+    with torch.no_grad():
+        for input, _, label in dataloader:            
+            input, label = input.to(device), label.to(device)
+            pred = model(input)
+            test_loss += loss_fn(pred, label).item()
+            correct += (pred.argmax(1) == label).type(torch.float).sum().item()
+    test_loss /= num_batches
+    correct /= size
+    print(data_name + f" Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
+    return test_loss
 
-        model.eval()
-        correct = 0
-        total = 0
-        with torch.no_grad():
-            for batch in test_dataloader:
-                inputs = batch[0].to(device)
-                labels = batch[1].squeeze().long().to(device)  # Squeeze labels here too
-                outputs = model(inputs)
-                _, predicted = torch.max(outputs.data, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
-                
-                # Clear memory
-                if hasattr(torch.cuda, 'empty_cache'):
-                    torch.cuda.empty_cache()
-
-        print(f'Epoch {epoch+1}/{num_epochs}, Accuracy: {100 * correct / total}%')
-
+def train_model(approach_name, model, device, train_dataloader, test_dataloader):
+    early_stopper = EarlyStopper(patience=3, min_delta=10) #early stopping so we don't accidentally mess up our boy
+    match approach_name:
+        case "CNN1":
+            epochs = 16
+        case "RNN":
+            epochs = 16
+        case _:
+            epochs = 32
+    
+    loss_fn = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    
+    for t in range(epochs):
+        print(f"Epoch {t+1}\n-------------------------------")
+        train_one_epoch(train_dataloader, model, loss_fn, optimizer, device)
+        validation_loss = test_one_epoch(test_dataloader,model,loss_fn, "Test", device)
+        if early_stopper.early_stop(validation_loss):
+            print("Stopping early.")           
+            break
     return model
