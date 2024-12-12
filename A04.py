@@ -28,8 +28,6 @@ class EarlyStopper:
             if self.counter >= self.patience:
                 return True
         return False
-
-
     
 class RNNVideoNet(nn.Module):
     def __init__(self, class_cnt):
@@ -38,63 +36,39 @@ class RNNVideoNet(nn.Module):
             nn.Conv3d(in_channels=3, out_channels=8,
                       kernel_size=(3,3,3),
                       padding="same"), 
-            #nn.ReLU(),
             nn.ELU(),
             nn.Conv3d(8, 8, (3,3,3), padding="same"),
-            #nn.ReLU(),
-            nn.ELU(),
-            
+            nn.ELU(),            
             nn.Conv3d(8, 8, (3,3,3), padding="same"),
-            #nn.ReLU(),
             nn.ELU(),
             nn.Conv3d(8, 8, (3,3,3), padding="same"),
-            #nn.ReLU(),
             nn.ELU(),
             nn.MaxPool3d((1,2,2)),
-            
-            
             nn.Conv3d(8, 16, (3,3,3), padding="same"),
-            #nn.ReLU(),
             nn.ELU(),
             nn.Conv3d(16, 16, (3,3,3), padding="same"),
-            #nn.ReLU()
-            nn.ELU(),
-            
-            nn.Conv3d(16, 16, (3,3,3), padding="same"),
-            #nn.ReLU(),
             nn.ELU(),
             nn.Conv3d(16, 16, (3,3,3), padding="same"),
-            #nn.ReLU(),
+            nn.ELU(),
+            nn.Conv3d(16, 16, (3,3,3), padding="same"),
             nn.ELU(),
             nn.MaxPool3d((1,2,2)),
-            
             nn.Conv3d(16, 32, (3,3,3), padding="same"),
-            #nn.ReLU(),
             nn.ELU(),
             nn.Conv3d(32, 32, (3,3,3), padding="same"),
-            #nn.ReLU(),
-            nn.ELU(),
-            
-            nn.Conv3d(32, 32, (3,3,3), padding="same"),
-            #nn.ReLU(),
             nn.ELU(),
             nn.Conv3d(32, 32, (3,3,3), padding="same"),
-            #nn.ReLU(),
+            nn.ELU(),
+            nn.Conv3d(32, 32, (3,3,3), padding="same"),
             nn.ELU(),
             nn.MaxPool3d((1,2,2)),
-            
             nn.Conv3d(32, 64, (3,3,3), padding="same"),
-            #nn.ReLU(),
             nn.ELU(),
             nn.Conv3d(64, 64, (3,3,3), padding="same"),
-            #nn.ReLU(),
-            nn.ELU(),
-            
-            nn.Conv3d(64, 64, (3,3,3), padding="same"),
-            #nn.ReLU(),
             nn.ELU(),
             nn.Conv3d(64, 64, (3,3,3), padding="same"),
-            #nn.ReLU(),
+            nn.ELU(),
+            nn.Conv3d(64, 64, (3,3,3), padding="same"),
             nn.ELU(),
             nn.MaxPool3d((1,2,2))
         ])
@@ -128,17 +102,16 @@ class RNNVideoNet(nn.Module):
         return logits
 
 def get_approach_names():
-    return ["CNN","RNN"]
+    return ["RNN"]
 
 def get_approach_description(approach_name):
     desc = {
-        "CNN":"basic",
-        "RNN":"Based on the RNN Video Net example from class. Doubles out layers after every other block, kernel size (3,3,3). Training Data is augmented with randomly applied grayscale, h/v flips, and solarization."
+        "RNN":"Based on the RNN Video Net example from class, kernel size (3,3,3)"
     }
     return desc.get(approach_name, "Invalid Approach Specified")
 
 def get_data_transform(approach_name, training):
-    target_size = (100,180) #height,width. tiny because my gpu only has 8gb ram :(
+    target_size = (224,224)
     if not training:
         data_transform = v2.Compose([v2.ToImage(), 
                                     v2.ToDtype(torch.float32, scale=True),
@@ -155,18 +128,13 @@ def get_data_transform(approach_name, training):
 
 def get_batch_size(approach_name):
     batch_sizes = {
-        "CNN0": 32,
-        "CNN1": 32,
-        "RNN": 32
+        "RNN": 16
     }
     return batch_sizes.get(approach_name, None)
 
 def create_model(approach_name, class_cnt):
     model = None
     match approach_name:
-        case "CNN":
-            # TODO: Implement CNN model or raise NotImplementedError
-            raise NotImplementedError("CNN model not implemented yet")
         case "RNN":
             model = RNNVideoNet(class_cnt)
         case _:
@@ -176,13 +144,10 @@ def create_model(approach_name, class_cnt):
 def train_one_epoch(dataloader, model, loss_fn, optimizer, device):
     size = len(dataloader.dataset)
     model.train()
-    # For HMDB: (X, _, y)
     for batch, (input, _, label) in enumerate(dataloader):
         input, label = input.to(device), label.to(device)
-        # Compute prediction error
         pred = model(input)
         loss = loss_fn(pred, label)
-        # Backpropagation
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -211,10 +176,8 @@ def test_one_epoch(dataloader, model, loss_fn, data_name, device):
     return test_loss
 
 def train_model(approach_name, model, device, train_dataloader, test_dataloader):
-    early_stopper = EarlyStopper(patience=3, min_delta=10) #early stopping so we don't accidentally mess up our boy
+    early_stopper = EarlyStopper(patience=3, min_delta=10) 
     match approach_name:
-        case "CNN1":
-            epochs = 16
         case "RNN":
             epochs = 16
         case _:
