@@ -1,0 +1,5 @@
+
+RNN:
+Training complete!
+Time taken: 3000.4958112239838
+Model saved to: ./assign04/output_UG/model_RNN.pth

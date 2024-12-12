@@ -156,20 +156,21 @@ def get_data_transform(approach_name, training):
 def get_batch_size(approach_name):
     batch_sizes = {
         "CNN0": 32,
-        "CNN1": 64,
+        "CNN1": 32,
         "RNN": 32
     }
     return batch_sizes.get(approach_name, None)
 
 def create_model(approach_name, class_cnt):
+    model = None
     match approach_name:
         case "CNN":
-            pass
+            # TODO: Implement CNN model or raise NotImplementedError
+            raise NotImplementedError("CNN model not implemented yet")
         case "RNN":
             model = RNNVideoNet(class_cnt)
         case _:
             print("Invalid Approach Specified")
-            model = None
     return model
 
 def train_one_epoch(dataloader, model, loss_fn, optimizer, device):
