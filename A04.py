@@ -1,167 +1,173 @@
 import torch
-import torch.nn as nn
-import torchvision.transforms.v2 as v2
-import torchvision.models as models
-from torch.optim import Adam
-import numpy as np
+from torch import nn
+from torchvision.transforms import v2
+from prettytable import PrettyTable
 
-class SimpleCNN(nn.Module):
-    def __init__(self, num_classes):
+# https://stackoverflow.com/a/73704579
+class EarlyStopper:
+    def __init__(self, patience=1, min_delta=0):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.counter = 0
+        self.min_validation_loss = float('inf')
+
+    def early_stop(self, validation_loss):
+        if validation_loss < self.min_validation_loss:
+            self.min_validation_loss = validation_loss
+            self.counter = 0
+        elif validation_loss > (self.min_validation_loss + self.min_delta):
+            self.counter += 1
+            if self.counter >= self.patience:
+                return True
+        return False
+    
+class RNNVideoNet(nn.Module):
+    def __init__(self, class_cnt):
         super().__init__()
-        self.conv1 = nn.Conv3d(3, 32, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv3d(32, 64, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv3d(64, 128, kernel_size=3, padding=1)
-        self.pool = nn.MaxPool3d(2)
-        self.fc1 = nn.Linear(128 * 3 * 8 * 8, 512)
-        self.fc2 = nn.Linear(512, num_classes)
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(0.5)
-
+        self.feature_extract = nn.ModuleList([
+            nn.Conv3d(in_channels=3, out_channels=8, kernel_size=(3,3,3), padding="same"), 
+            nn.ELU(),
+            nn.MaxPool3d((1,2,2)),
+            nn.Conv3d(8, 16, (3,3,3), padding="same"),
+            nn.ELU(),
+            nn.MaxPool3d((1,2,2))
+        ])
+        
+        self.flatten = nn.Flatten(start_dim=2)
+        
+        # New size calculation for 112x112 input
+        # After 2 MaxPool3d: 112/4 = 28
+        # Last conv has 16 channels
+        # So flattened size is: 16 * 28 * 28 = 12544
+        expected_size = 12544
+        
+        self.rnn = nn.RNN(input_size=expected_size, 
+                          hidden_size=1024,  
+                          num_layers=1,
+                          batch_first=True)
+        
+        self.classifier_stack = nn.Sequential(                           
+            nn.Linear(1024, class_cnt)  
+        )
+        
     def forward(self, x):
-        x = self.pool(self.relu(self.conv1(x)))
-        x = self.pool(self.relu(self.conv2(x)))
-        x = self.pool(self.relu(self.conv3(x)))
-        x = x.view(x.size(0), -1)
-        x = self.dropout(self.relu(self.fc1(x)))
-        x = self.fc2(x)
-        return x
-
-class ResNetCNN(nn.Module):
-    def __init__(self, num_classes):
-        super().__init__()
-        # First process temporal information
-        self.conv3d = nn.Conv3d(3, 64, kernel_size=(3, 3, 3), padding=(1, 1, 1))
-        self.bn3d = nn.BatchNorm3d(64)
-        self.relu = nn.ReLU()
-        self.pool3d = nn.MaxPool3d(kernel_size=(2, 2, 2))
+        PRINT_DEBUG = True
+        print("Input shape:", x.shape)
+        x = torch.transpose(x, 1, 2)
+        print("After transpose 1:", x.shape)
         
-        # Load pretrained ResNet
-        self.resnet = models.resnet18(pretrained=True)
-        # Replace first conv layer to handle 64 input channels
-        self.resnet.conv1 = nn.Conv2d(64, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        # Modify final FC layer
-        self.resnet.fc = nn.Linear(512, num_classes)
-
-    def forward(self, x):
-        # x shape: [batch, frames, channels, height, width]
-        batch_size, frames, channels, height, width = x.size()
+        for index, layer in enumerate(self.feature_extract):
+            x = layer(x)
+            if PRINT_DEBUG: print(f"After layer {index}:", x.shape)
+            
+        x = torch.transpose(x, 1, 2)
+        print("After transpose 2:", x.shape)
+        x = self.flatten(x)
+        print("After flatten:", x.shape)
         
-        # Permute to [batch, channels, frames, height, width]
-        x = x.permute(0, 2, 1, 3, 4)
-        
-        # Apply 3D convolution
-        x = self.conv3d(x)
-        x = self.bn3d(x)
-        x = self.relu(x)
-        x = self.pool3d(x)
-        
-        # Reshape for ResNet
-        # Combine batch and temporal dimensions
-        x = x.transpose(1, 2).contiguous()
-        x = x.view(-1, 64, height//2, width//2)
-        
-        # Pass through ResNet
-        x = self.resnet(x)
-        
-        # Average across temporal dimension
-        x = x.view(batch_size, -1, self.resnet.fc.out_features).mean(1)
-        
-        return x
+        try:
+            out, _ = self.rnn(x)
+            print("After RNN:", out.shape)
+            out = out[:,-1,:]
+            print("After selecting last:", out.shape)
+            logits = self.classifier_stack(out)
+            print("Final output:", logits.shape)
+            return logits
+        except RuntimeError as e:
+            print("Error in RNN forward pass:")
+            print(e)
+            raise e
 
 def get_approach_names():
-    return ["SimpleCNN", "ResNetCNN"]
+    return ["RNN"]
 
 def get_approach_description(approach_name):
-    descriptions = {
-        "SimpleCNN": "Basic 3D CNN with three convolutional layers",
-        "ResNetCNN": "ResNet18 backbone with additional 3D convolution layers"
+    desc = {
+        "RNN":"Based on the RNN Video Net example from class, kernel size (3,3,3)"
     }
-    return descriptions.get(approach_name, "Unknown approach")
+    return desc.get(approach_name, "Invalid Approach Specified")
 
 def get_data_transform(approach_name, training):
-    base_transform = [
-        v2.ToDtype(torch.float32, scale=True)
-    ]
-    
-    if approach_name == "SimpleCNN":
-        base_transform.insert(0, v2.Resize((64, 64)))
-        if training:
-            base_transform.extend([
-                v2.RandomHorizontalFlip(),
-                v2.RandomRotation(15)
-            ])
-    else:  # ResNetCNN
-        base_transform.insert(0, v2.Resize((224, 224)))
-        if training:
-            base_transform.extend([
-                v2.RandomHorizontalFlip(),
-                v2.ColorJitter(brightness=0.2, contrast=0.2)
-            ])
-    
-    return v2.Compose(base_transform)
+    target_size = (112,112)  #memory constraints for you memeory poor people unlike my 384Gb PowerEdge
+    if not training:
+        data_transform = v2.Compose([v2.ToImage(), 
+                                    v2.ToDtype(torch.float32, scale=True),
+                                    v2.Resize(target_size)])
+    else:
+        data_transform = v2.Compose([v2.ToImage(), 
+                                    v2.ToDtype(torch.float32, scale=True),
+                                    v2.RandomGrayscale(0.3),
+                                    v2.RandomSolarize(0.3),
+                                    v2.RandomHorizontalFlip(0.3),
+                                    v2.RandomVerticalFlip(0.3),
+                                    v2.Resize(target_size)])
+    return data_transform
 
 def get_batch_size(approach_name):
     batch_sizes = {
-        "SimpleCNN": 32,
-        "ResNetCNN": 16  # Smaller batch size due to larger model
+        "RNN": 8  # 8 videos per batch
     }
-    return batch_sizes.get(approach_name, 32)
+    return batch_sizes.get(approach_name, None)
 
 def create_model(approach_name, class_cnt):
-    models = {
-        "SimpleCNN": SimpleCNN(class_cnt),
-        "ResNetCNN": ResNetCNN(class_cnt)
-    }
-    return models.get(approach_name)
+    model = None
+    match approach_name:
+        case "RNN":
+            model = RNNVideoNet(class_cnt)
+        case _:
+            print("Invalid Approach Specified")
+    return model
+
+def train_one_epoch(dataloader, model, loss_fn, optimizer, device):
+    size = len(dataloader.dataset)
+    model.train()
+    for batch, (input, _, label) in enumerate(dataloader):
+        input, label = input.to(device), label.to(device)
+        pred = model(input)
+        loss = loss_fn(pred, label)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        if batch % 100 == 0:
+            loss, current = loss.item(), (batch + 1) * len(input)
+            print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
+            
+        if hasattr(torch.cuda, 'empty_cache'):
+            torch.cuda.empty_cache()
+        
+            
+def test_one_epoch(dataloader, model, loss_fn, data_name, device):
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    model.eval()
+    test_loss, correct = 0, 0
+    with torch.no_grad():
+        for input, _, label in dataloader:            
+            input, label = input.to(device), label.to(device)
+            pred = model(input)
+            test_loss += loss_fn(pred, label).item()
+            correct += (pred.argmax(1) == label).type(torch.float).sum().item()
+    test_loss /= num_batches
+    correct /= size
+    print(data_name + f" Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
+    return test_loss
 
 def train_model(approach_name, model, device, train_dataloader, test_dataloader):
-    criterion = nn.CrossEntropyLoss()
-    optimizer = Adam(model.parameters(), lr=0.001)
-    epochs = 25
+    early_stopper = EarlyStopper(patience=3, min_delta=10) 
+    match approach_name:
+        case "RNN":
+            epochs = 16
+        case _:
+            epochs = 32
     
-    for epoch in range(epochs):
-        model.train()
-        for batch in train_dataloader:
-            # Handle different dataloader formats
-            if isinstance(batch, (list, tuple)):
-                if len(batch) == 2:
-                    data, target = batch
-                elif len(batch) == 3:
-                    data, target, _ = batch  # If there's an extra value (like index)
-                else:
-                    raise ValueError(f"Unexpected batch format with {len(batch)} elements")
-            else:
-                raise ValueError("Batch should be a tuple or list")
-
-            data, target = data.to(device), target.to(device)
-            optimizer.zero_grad()
-            output = model(data)
-            loss = criterion(output, target)
-            loss.backward()
-            optimizer.step()
-            
-        if epoch % 5 == 0:
-            model.eval()
-            correct = 0
-            total = 0
-            with torch.no_grad():
-                for batch in test_dataloader:
-                    # Handle different dataloader formats for test data
-                    if isinstance(batch, (list, tuple)):
-                        if len(batch) == 2:
-                            data, target = batch
-                        elif len(batch) == 3:
-                            data, target, _ = batch
-                        else:
-                            raise ValueError(f"Unexpected batch format with {len(batch)} elements")
-                    else:
-                        raise ValueError("Batch should be a tuple or list")
-
-                    data, target = data.to(device), target.to(device)
-                    outputs = model(data)
-                    _, predicted = torch.max(outputs.data, 1)
-                    total += target.size(0)
-                    correct += (predicted == target).sum().item()
-            print(f'Epoch {epoch}: Test Accuracy: {100 * correct / total:.2f}%')
+    loss_fn = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     
+    for t in range(epochs):
+        print(f"Epoch {t+1}\n-------------------------------")
+        train_one_epoch(train_dataloader, model, loss_fn, optimizer, device)
+        validation_loss = test_one_epoch(test_dataloader,model,loss_fn, "Test", device)
+        if early_stopper.early_stop(validation_loss):
+            print("Stopping early.")           
+            break
     return model
