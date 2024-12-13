@@ -1,16 +1,8 @@
 import torch
-import torchvision
 from torch import nn
-from torch.utils.data import DataLoader, Dataset
-from torchvision import datasets
 from torchvision.transforms import v2
-import cv2
-import numpy as np
-import os
-import sys
 from prettytable import PrettyTable
 
-# early stopping
 # https://stackoverflow.com/a/73704579
 class EarlyStopper:
     def __init__(self, patience=1, min_delta=0):
@@ -33,73 +25,58 @@ class RNNVideoNet(nn.Module):
     def __init__(self, class_cnt):
         super().__init__()
         self.feature_extract = nn.ModuleList([
-            nn.Conv3d(in_channels=3, out_channels=8,
-                      kernel_size=(3,3,3),
-                      padding="same"), 
-            nn.ELU(),
-            nn.Conv3d(8, 8, (3,3,3), padding="same"),
-            nn.ELU(),            
-            nn.Conv3d(8, 8, (3,3,3), padding="same"),
-            nn.ELU(),
-            nn.Conv3d(8, 8, (3,3,3), padding="same"),
+            nn.Conv3d(in_channels=3, out_channels=8, kernel_size=(3,3,3), padding="same"), 
             nn.ELU(),
             nn.MaxPool3d((1,2,2)),
             nn.Conv3d(8, 16, (3,3,3), padding="same"),
-            nn.ELU(),
-            nn.Conv3d(16, 16, (3,3,3), padding="same"),
-            nn.ELU(),
-            nn.Conv3d(16, 16, (3,3,3), padding="same"),
-            nn.ELU(),
-            nn.Conv3d(16, 16, (3,3,3), padding="same"),
-            nn.ELU(),
-            nn.MaxPool3d((1,2,2)),
-            nn.Conv3d(16, 32, (3,3,3), padding="same"),
-            nn.ELU(),
-            nn.Conv3d(32, 32, (3,3,3), padding="same"),
-            nn.ELU(),
-            nn.Conv3d(32, 32, (3,3,3), padding="same"),
-            nn.ELU(),
-            nn.Conv3d(32, 32, (3,3,3), padding="same"),
-            nn.ELU(),
-            nn.MaxPool3d((1,2,2)),
-            nn.Conv3d(32, 64, (3,3,3), padding="same"),
-            nn.ELU(),
-            nn.Conv3d(64, 64, (3,3,3), padding="same"),
-            nn.ELU(),
-            nn.Conv3d(64, 64, (3,3,3), padding="same"),
-            nn.ELU(),
-            nn.Conv3d(64, 64, (3,3,3), padding="same"),
             nn.ELU(),
             nn.MaxPool3d((1,2,2))
         ])
         
         self.flatten = nn.Flatten(start_dim=2)
         
-        expected_size = 4224
+        # New size calculation for 112x112 input
+        # After 2 MaxPool3d: 112/4 = 28
+        # Last conv has 16 channels
+        # So flattened size is: 16 * 28 * 28 = 12544
+        expected_size = 12544
         
         self.rnn = nn.RNN(input_size=expected_size, 
-                          hidden_size=expected_size,
+                          hidden_size=1024,  
                           num_layers=1,
                           batch_first=True)
         
         self.classifier_stack = nn.Sequential(                           
-            nn.Linear(expected_size, class_cnt)
+            nn.Linear(1024, class_cnt)  
         )
         
     def forward(self, x):
-        PRINT_DEBUG = False
+        PRINT_DEBUG = True
+        print("Input shape:", x.shape)
         x = torch.transpose(x, 1, 2)
+        print("After transpose 1:", x.shape)
+        
         for index, layer in enumerate(self.feature_extract):
             x = layer(x)
-        if PRINT_DEBUG: print("FEATURES:", x.shape)
+            if PRINT_DEBUG: print(f"After layer {index}:", x.shape)
+            
         x = torch.transpose(x, 1, 2)
+        print("After transpose 2:", x.shape)
         x = self.flatten(x)
-        if PRINT_DEBUG: print("FLATTENED:", x.shape)
-        out, _ = self.rnn(x)
-        if PRINT_DEBUG: print("OUT:", out.shape)
-        out = out[:,-1,:]        
-        logits = self.classifier_stack(out)
-        return logits
+        print("After flatten:", x.shape)
+        
+        try:
+            out, _ = self.rnn(x)
+            print("After RNN:", out.shape)
+            out = out[:,-1,:]
+            print("After selecting last:", out.shape)
+            logits = self.classifier_stack(out)
+            print("Final output:", logits.shape)
+            return logits
+        except RuntimeError as e:
+            print("Error in RNN forward pass:")
+            print(e)
+            raise e
 
 def get_approach_names():
     return ["RNN"]
@@ -111,7 +88,7 @@ def get_approach_description(approach_name):
     return desc.get(approach_name, "Invalid Approach Specified")
 
 def get_data_transform(approach_name, training):
-    target_size = (224,224)
+    target_size = (112,112)  #memory constraints for you memeory poor people unlike my 384Gb PowerEdge
     if not training:
         data_transform = v2.Compose([v2.ToImage(), 
                                     v2.ToDtype(torch.float32, scale=True),
@@ -128,7 +105,7 @@ def get_data_transform(approach_name, training):
 
 def get_batch_size(approach_name):
     batch_sizes = {
-        "RNN": 16
+        "RNN": 8  # 8 videos per batch
     }
     return batch_sizes.get(approach_name, None)
 

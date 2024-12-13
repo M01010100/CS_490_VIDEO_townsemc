@@ -1,0 +1,8 @@
+link: 
+RNN:
+Test Error: 
+ Accuracy: 68.5%, Avg loss: 0.610821 
+
+Training complete!
+Time taken: 287.8486511707306
+Model saved to: ./assign04/output_UG/model_RNN.pth
