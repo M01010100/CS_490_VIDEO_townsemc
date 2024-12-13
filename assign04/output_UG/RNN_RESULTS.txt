@@ -1,0 +1,49 @@
+****************************************
+APPROACHES: 
+****************************************
+
+* RNN
+	 Based on the RNN Video Net example from class, kernel size (3,3,3)
+
+****************************************
+RESULTS:
+****************************************
+APPROACH	TRAINING_accuracy	TRAINING_f1	TESTING_accuracy	TESTING_f1
+RNN	0.6514	0.3944	0.6852	0.4066
+
+****************************************
+MODEL ARCHITECTURES:
+****************************************
+* RNN
+RNNVideoNet(
+  (feature_extract): ModuleList(
+    (0): Conv3d(3, 8, kernel_size=(3, 3, 3), stride=(1, 1, 1), padding=same)
+    (1): ELU(alpha=1.0)
+    (2): MaxPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2), padding=0, dilation=1, ceil_mode=False)
+    (3): Conv3d(8, 16, kernel_size=(3, 3, 3), stride=(1, 1, 1), padding=same)
+    (4): ELU(alpha=1.0)
+    (5): MaxPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2), padding=0, dilation=1, ceil_mode=False)
+  )
+  (flatten): Flatten(start_dim=2, end_dim=-1)
+  (rnn): RNN(12544, 1024, batch_first=True)
+  (classifier_stack): Sequential(
+    (0): Linear(in_features=1024, out_features=2, bias=True)
+  )
+)
+
++---------------------------+------------+
+|          Modules          | Parameters |
++---------------------------+------------+
+|  feature_extract.0.weight |    648     |
+|   feature_extract.0.bias  |     8      |
+|  feature_extract.3.weight |    3456    |
+|   feature_extract.3.bias  |     16     |
+|      rnn.weight_ih_l0     |  12845056  |
+|      rnn.weight_hh_l0     |  1048576   |
+|       rnn.bias_ih_l0      |    1024    |
+|       rnn.bias_hh_l0      |    1024    |
+| classifier_stack.0.weight |    2048    |
+|  classifier_stack.0.bias  |     2      |
++---------------------------+------------+
+Total Trainable Params: 13901858
+
