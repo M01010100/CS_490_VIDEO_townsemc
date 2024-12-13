@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-
+#best of undergraduate students
 def track_doggo(video_frames, first_box):
     params = {
         'search_margin': 50,
