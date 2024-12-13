@@ -1,5 +1,3 @@
-link: 
-RNN:
 Test Error: 
  Accuracy: 68.5%, Avg loss: 0.610821 
 
