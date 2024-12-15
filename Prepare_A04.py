@@ -36,7 +36,7 @@ from pathlib import Path
 
 # WARNING: If you want your data put somewhere OTHER than in the project directory,
 # change this variable
-CORE_DATA_DIR = os.path.join(".", "data")
+CORE_DATA_DIR = os.path.join("..", "..", "Data")
 
 def get_data_params(is_grad):
     if is_grad:
